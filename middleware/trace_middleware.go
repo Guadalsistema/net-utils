@@ -1,0 +1,95 @@
+package middleware
+
+import (
+	"bytes"
+	"io"
+	"log/slog"
+	"net/http"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/Guadalsistema/net-utils/log"
+	"github.com/Guadalsistema/net-utils/trace"
+	"github.com/Guadalsistema/net-utils/utils"
+)
+
+// LogHeaders turns http.Header into a slog.Group("headers", …)
+func logHeaders(h http.Header) slog.Attr {
+	var args []any
+	var keys []string
+	for k := range h {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, k, strings.Join(h[k], ","))
+	}
+	return slog.Group("headers", args...)
+}
+
+/* -------------------------------------------------------------------------- */
+
+// maxBodyLog limits how much of the body we copy for logging.
+// You can override it before you register the middleware.
+var maxBodyLog int64 = 1 << 20 // 1 MiB
+// ctxKeyRawBody is an unexported context key.
+
+// TraceMiddleware returns a fully-formed http.Handler middleware.
+// It captures the request body and response body, and logs them.
+// It also creates a unique transaction Idfor the request available in the request context.
+func TraceMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			logger := l
+			start := time.Now()
+			/* ---------- advance work: Tx-Id+ capture body ---------- */
+			txId := utils.RandomKey(8)
+
+			// Create new request with modified context
+			newReq := r.WithContext(trace.WithTraceId(r.Context(), txId))
+			resp := &utils.ResponseRecorder{ResponseWriter: w, Status: http.StatusOK}
+			ctx := newReq.Context()
+
+			/* ----------- capture request body via TeeReader ----------- */
+			var logbuf bytes.Buffer
+			tee := io.TeeReader(newReq.Body, &utils.CappedWriter{Writer: &logbuf, Remain: maxBodyLog})
+			newReq.Body = io.NopCloser(tee)
+
+			if err := log.ContextInfo(logger, ctx, "Request", "URI", newReq.RequestURI, "method", newReq.Method); err != nil {
+				slog.ErrorContext(ctx, "Failed to log request", "error", err)
+			}
+
+			if logger.Enabled(ctx, slog.LevelDebug) {
+				payload, err := io.ReadAll(newReq.Body)
+				if err != nil {
+					log.ContextError(logger, ctx, "Failed to read request body", "error", err)
+					http.Error(resp, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+					return
+				}
+				// Read request for log
+				log.ContextDebug(logger, ctx, "Request body", "method", newReq.Method, "size", logbuf.Len(), logHeaders(newReq.Header), "body", utils.TruncateString(logbuf.String(), maxBodyLog))
+				newReq.Body = io.NopCloser(bytes.NewReader(payload)) // volver a ponerlo
+			}
+
+			if next == nil {
+				log.ContextError(logger, ctx, "Server error", "error", "next HTTP handler is nil.")
+				http.Error(resp, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				return
+			}
+			if newReq.Body == nil {
+				log.ContextError(logger, ctx, "Server error", "error", "Request body is nil.")
+				http.Error(resp, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				return
+			}
+
+			// Use the new request with modified context
+			next.ServeHTTP(resp, newReq)
+
+			/* ---------- log outgoing response ---------- */
+			elapsed := time.Since(start)
+			log.ContextInfo(logger, newReq.Context(), "Response", "status", resp.Status, "size", resp.Buf.Len(), "elapsed", elapsed)
+			log.ContextDebug(logger, newReq.Context(), "Response body", "size", resp.Buf.Len(), logHeaders(resp.Header()), "body", utils.TruncateString(resp.Buf.String(), maxBodyLog))
+		})
+	}
+}
