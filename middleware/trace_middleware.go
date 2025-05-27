@@ -5,28 +5,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/Guadalsistema/net-utils/log"
 	"github.com/Guadalsistema/net-utils/trace"
 	"github.com/Guadalsistema/net-utils/utils"
 )
-
-// LogHeaders turns http.Header into a slog.Group("headers", …)
-func logHeaders(h http.Header) slog.Attr {
-	var args []any
-	var keys []string
-	for k := range h {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		args = append(args, k, strings.Join(h[k], ","))
-	}
-	return slog.Group("headers", args...)
-}
 
 /* -------------------------------------------------------------------------- */
 
@@ -68,7 +52,7 @@ func TraceMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 					return
 				}
 				// Read request for log
-				log.ContextDebug(logger, ctx, "Request body", "method", newReq.Method, "size", logbuf.Len(), logHeaders(newReq.Header), "body", utils.TruncateString(logbuf.String(), maxBodyLog))
+				log.ContextDebug(logger, ctx, "Request body", "method", newReq.Method, "size", logbuf.Len(), log.LogHeaders(newReq.Header), "body", utils.TruncateString(logbuf.String(), maxBodyLog))
 				newReq.Body = io.NopCloser(bytes.NewReader(payload)) // volver a ponerlo
 			}
 
@@ -89,7 +73,7 @@ func TraceMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 			/* ---------- log outgoing response ---------- */
 			elapsed := time.Since(start)
 			log.ContextInfo(logger, newReq.Context(), "Response", "status", resp.Status, "size", resp.Buf.Len(), "elapsed", elapsed)
-			log.ContextDebug(logger, newReq.Context(), "Response body", "size", resp.Buf.Len(), logHeaders(resp.Header()), "body", utils.TruncateString(resp.Buf.String(), maxBodyLog))
+			log.ContextDebug(logger, newReq.Context(), "Response body", "size", resp.Buf.Len(), log.LogHeaders(resp.Header()), "body", utils.TruncateString(resp.Buf.String(), maxBodyLog))
 		})
 	}
 }
