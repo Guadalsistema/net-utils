@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"compress/gzip"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,17 @@ import (
 )
 
 /* -------------------------------------------------------------------------- */
+
+// decompressGzip function to handle gzip decompression
+func decompressGzip(data []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	return io.ReadAll(reader)
+}
 
 // maxBodyLog limits how much of the body we copy for logging.
 // You can override it before you register the middleware.
@@ -40,7 +52,7 @@ func TraceMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 			tee := io.TeeReader(newReq.Body, &utils.CappedWriter{Writer: &logbuf, Remain: maxBodyLog})
 			newReq.Body = io.NopCloser(tee)
 
-			if err := log.ContextInfo(logger, ctx, "Request", "URI", newReq.RequestURI, "method", newReq.Method); err != nil {
+			if err := log.ContextDebug(logger, ctx, "Request", "Url", newReq.URL.String(), "method", newReq.Method); err != nil {
 				slog.ErrorContext(ctx, "Failed to log request", "error", err)
 			}
 
@@ -67,13 +79,26 @@ func TraceMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 				return
 			}
 
+			w.Header().Set("X-Tx-Id", txId) // Set transaction ID in response header
+
 			// Use the new request with modified context
 			next.ServeHTTP(resp, newReq)
 
 			/* ---------- log outgoing response ---------- */
 			elapsed := time.Since(start)
-			log.ContextInfo(logger, newReq.Context(), "Response", "status", resp.Status, "size", resp.Buf.Len(), "elapsed", elapsed)
-			log.ContextDebug(logger, newReq.Context(), "Response body", "size", resp.Buf.Len(), log.LogHeaders(resp.Header()), "body", utils.TruncateString(resp.Buf.String(), maxBodyLog))
+			log.ContextInfo(logger, newReq.Context(), "Response", "Url", newReq.URL.String(), "method", newReq.Method, "status", resp.Status, "size", resp.Buf.Len(), "elapsed", elapsed)
+			if l.Enabled(ctx, slog.LevelDebug) {
+				if resp.Header().Get("Content-Encoding") == "gzip" {
+					if decompressedBody, err := decompressGzip(resp.Buf.Bytes()); err == nil {
+						log.ContextDebug(logger, newReq.Context(), "Response body", "size", len(decompressedBody), log.LogHeaders(resp.Header()), "body", utils.TruncateString(string(decompressedBody), maxBodyLog))
+					} else {
+						log.ContextError(logger, ctx, "Failed to decompress response body", "error", err)
+					}
+				} else {
+					// Normal logging for non-gzipped responses
+					log.ContextDebug(logger, newReq.Context(), "Response body", "size", resp.Buf.Len(), log.LogHeaders(resp.Header()), "body", utils.TruncateString(resp.Buf.String(), maxBodyLog))
+				}
+			}
 		})
 	}
 }
