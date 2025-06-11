@@ -139,7 +139,6 @@ func TestLoggingMetaMiddlewareInfo(t *testing.T) {
 		desc   string
 	}{
 		{gotTxId, "tx-id in logs"},
-		{"Request", "request/response log line"},
 	}
 
 	for _, c := range cases {

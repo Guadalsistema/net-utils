@@ -10,9 +10,21 @@ import (
 type OrderedObject []ObjectMember
 
 // ObjectMember is one member of a JSON object.
+// TODO conside implement it as generic type ObjectMember[K comparable, V any].
+// This would allow us to use any type for the key, not just string.
 type ObjectMember struct {
-	Name  string
+	Key   string
 	Value any
+}
+
+// getValue returns the value associated with key in an OrderedObject.
+func (oo OrderedObject) Get(key string) (any, bool) {
+	for _, pair := range oo {
+		if pair.Key == key {
+			return pair.Value, true
+		}
+	}
+	return nil, false
 }
 
 // UnmarshalJSON implements json.Unmarshaler, decoding into an OrderedObject.
@@ -88,7 +100,7 @@ func (o OrderedObject) MarshalJSON() ([]byte, error) {
 			buf.WriteByte(',')
 		}
 		// write the key
-		keyB, _ := json.Marshal(m.Name)
+		keyB, _ := json.Marshal(m.Key)
 		buf.Write(keyB)
 		buf.WriteByte(':')
 
