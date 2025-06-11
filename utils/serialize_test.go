@@ -3,6 +3,8 @@ package utils
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"math"
 	"testing"
 )
 
@@ -52,5 +54,52 @@ func TestOrderedObject_MarshalOrder(t *testing.T) {
 				t.Errorf("unexpected JSON order:\n got: %s\nwant: %s", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestOrderedObjectUnmarshal(t *testing.T) {
+	jsonData := []byte(fmt.Sprintf(`{
+		"int64": %d,
+		"float64": %g,
+		"string": "%s",
+		"bool": %t,
+		"null": %s
+	}`, 42, math.SmallestNonzeroFloat64, "hello", true, "null"))
+
+	var orderedObj OrderedObject
+	err := orderedObj.UnmarshalJSON(jsonData)
+	if err != nil {
+		t.Fatalf("Unmarshaling failed: %v", err)
+	}
+
+	testCases := []struct {
+		key          string
+		expectedType string // expected type as a formatted string
+	}{
+		{"int64", "int64"},
+		{"float64", "float64"}, // Should be unmarshaled as float64
+		{"string", "string"},   // Should remain a string
+		{"bool", "bool"},       // Should remain a bool
+		{"null", "nil"},        // Should be nil
+	}
+
+	for _, tc := range testCases {
+		val, found := orderedObj.Get(tc.key)
+		if !found {
+			t.Fatalf("Key %s not found", tc.key)
+		}
+
+		if val == nil {
+			if tc.expectedType != "nil" {
+				t.Errorf("Expected %s for key %s, but got nil", tc.expectedType, tc.key)
+			}
+			continue
+		}
+
+		actualType := fmt.Sprintf("%T", val)
+
+		if actualType != tc.expectedType {
+			t.Errorf("For key %s, expected type %s, but got %s", tc.key, tc.expectedType, actualType)
+		}
 	}
 }
