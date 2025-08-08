@@ -54,6 +54,7 @@ func TraceMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 
 			if err := log.ContextDebug(logger, ctx, "Request", "Url", newReq.URL.String(), "method", newReq.Method); err != nil {
 				slog.ErrorContext(ctx, "Failed to log request", "error", err)
+				return
 			}
 
 			if logger.Enabled(ctx, slog.LevelDebug) {
