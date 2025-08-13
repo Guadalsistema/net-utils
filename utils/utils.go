@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/json"
 	"io"
 	"net/http"
 )
@@ -67,4 +68,23 @@ func RandomKey(n int) string {
 		b[i] = letters[int(v)%len(letters)]
 	}
 	return string(b)
+}
+
+func DecodeStrict[T any](raw any) (T, error) {
+	var zero T
+	// Convert the result to AccessToken
+	resultJSON, err := json.Marshal(raw)
+	if err != nil {
+		return zero, err
+	}
+
+	decoder := json.NewDecoder(bytes.NewBuffer(resultJSON))
+	decoder.DisallowUnknownFields()
+
+	var t T
+	if err := decoder.Decode(&t); err != nil {
+		return zero, err
+	}
+
+	return t, nil
 }
