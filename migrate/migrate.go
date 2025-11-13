@@ -2,7 +2,6 @@ package migrate
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/sqlite" // registers the sqlite driver (pure go)
