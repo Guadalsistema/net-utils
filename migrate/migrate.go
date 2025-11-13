@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/sqlite" // registers the sqlite driver (pure go)
@@ -10,6 +11,15 @@ import (
 
 // newMigrate constructs a *migrate.Migrate for the given SQLite URL and migrations dir.
 func newMigrate(databaseURL, migrationsDir string) (*migrate.Migrate, error) {
+	// Expand the migrationsDir if it's a relative path
+	if !filepath.IsAbs(migrationsDir) {
+		absPath, err := filepath.Abs(migrationsDir)
+		if err != nil {
+			return nil, fmt.Errorf("resolving absolute path: %w", err)
+		}
+		migrationsDir = absPath
+	}
+
 	// prepend file:// to point at the local folder of .sql files
 	sourceURL := "file://" + migrationsDir
 	m, err := migrate.New(sourceURL, databaseURL)
